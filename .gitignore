@@ -1,0 +1,7 @@
+**/node_modules
+**/.env*
+!**/.env.template
+**/.build
+**/.serverless
+**/.DS_Store
+**/dist
