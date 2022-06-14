@@ -4,14 +4,13 @@ const mongoose = require('mongoose');
 const busboy = require('busboy');
 const { drive_v3, google, clouddebugger_v2 } = require('googleapis');
 const { GoogleAuth } = require('google-auth-library');
-const multer = require('multer');
 require('dotenv').config();
 
 
 const app = express();
 const PORT = 3000;
 
-const apiKey = process.env.G_API_KEY;
+const apiKey = process.env.G_API_KEY;     //doesnt seem to be used
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -42,23 +41,17 @@ app.get('/test', testRoute);
 
 app.post('/upload', upload);
 app.post('/search', search);
-app.post('/delete', remove)
-
-
+app.post('/delete', remove);    //not currently working
 
 // dump all other requests
 app.all('*', (_req, res) => res.sendStatus(404));
-
-
-
-
-
 
 
 ///////////////
 // FUNCTIONS //
 ///////////////
 
+//Delete files
 async function remove(req, res){
   //google auth setup
   const credentials = {
@@ -91,7 +84,7 @@ async function remove(req, res){
 
 }
 
-
+//Used to find all files under this folder
 async function search(_req, res){
   console.log('---- in search function');
   const folderId = '1C8G-Yy0d1Zzw9SzFdNuu6Qj3C1ANWnKc'    //to /testFolder
@@ -138,14 +131,15 @@ async function search(_req, res){
   
 
   res.sendStatus(200)
-
-
 }
 
+//First route to test app
 function testRoute(req, res){
   console.log('------ test route hit -------');
   res.status(200).send('Test route hit!');
 };
+
+
 
 //////////////////////////////
 // UPLOAD FILE FROM POSTMAN //
@@ -154,7 +148,11 @@ async function upload(req, res){
   console.log('------ upload route --------');
   
   // const folderId = '1C8G-Yy0d1Zzw9SzFdNuu6Qj3C1ANWnKc'    //to /testFolder
-  const folderId = '1f7l0TJ_Pfm9YO2tfcyN3N1J6I7aaUawX'
+  // const folderId = '1f7l0TJ_Pfm9YO2tfcyN3N1J6I7aaUawX'      //the root shared folder, probably should be pulled from ENV file
+  const folderId = process.env.ROOT_FOLDER_ID;
+
+  if (!folderId)   { res.sendStatus(400) };
+
 
   const { headers } = req;
   const bb = busboy({ headers });
@@ -162,15 +160,9 @@ async function upload(req, res){
   bb._writableState.autoDestroy = false;
 
   let data;
-
-
   bb.on('field', (fieldname, val) => {
     data = JSON.parse(val);
   })
-
-
-  
-
 
   bb.on('file', async (_name, fileStream, fileInfo) => {
     // console.log(_name, fileStream, fileInfo);
@@ -201,7 +193,6 @@ async function upload(req, res){
       credentials, 
       scopes: 'https://www.googleapis.com/auth/drive'
     })
-
     const service = google.drive({
       version: 'v3',
       auth,
@@ -210,18 +201,17 @@ async function upload(req, res){
 
     //check for customer folder
     const custFolder = await service.files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${customerId}' and parents='${folderId}'`     //this if for looking for the customer folder
+      q: `mimeType='application/vnd.google-apps.folder' and name='${customerId}' and parents='${folderId}'`
     })
-
-    console.log(custFolder.data.files);
-
+    // console.log(custFolder.data.files);
 
     let newFolder;
     if (custFolder.data.files.length === 0){
       newFolder = await _createFolder(customerId, folderId);
-      console.log(newFolder.data)
+      // console.log(newFolder.data)
     }
 
+    //set id of of parent folder either the found folder or the newly created folder
     const partParentFolder = custFolder.data.files[0]?.id || newFolder.data.id;
 
 
@@ -230,16 +220,16 @@ async function upload(req, res){
     const partFolder = await service.files.list({
       q: `mimeType='application/vnd.google-apps.folder' and name='${partNumber}-${partRev}' and parents='${partParentFolder}'`     //this if for looking for the part folder
     })
-
-    console.log(partFolder.data.files);
+    // console.log(partFolder.data.files);
 
     let newPartFolder;
     if (partFolder.data.files.length === 0){
       const pfName = `${partNumber}-${partRev}`;
       newPartFolder = await _createFolder(pfName, partParentFolder);
-      console.log(newPartFolder.data)
+      // console.log(newPartFolder.data)
     }
 
+    // set id of part number folder from either the found folder or newly created folder
     const fileParentFolder = partFolder.data.files[0]?.id || newPartFolder.data.id;
 
 
@@ -261,68 +251,24 @@ async function upload(req, res){
           return folder;
     }
 
-    
-
-
-
-    // //check if customer folder is needed
-    // if (custFolder.data.files.length === 0){
-    //   console.log('--------------customer folder doesnt exist')
-    //   const body = {
-    //     mimeType: 'application/vnd.google-apps.folder',
-    //     name: customerId,
-    //     parents: [folderId],
-    //   };
-
-    //   //create folder
-    //   await service.files.create({
-    //     media,
-    //     requestBody: body,
-    //     fields: 'id',
-    //     supportsAllDrives: true,
-    //   })
-    //   .catch((e) => bb.emit('error', e))
-    // }
-    
-
-
-    // //check for files at drive location
-    // try {
-    //   const files = await service.files.list({
-    //     // fileId: fileId,
-    //     // fields: 'parents'
-    //   })
-    //   console.log('==============');
-    //   console.log(files);
-
-      
-    // } catch (error) {
-    //   console.log(error);
-    // }
-
-    // console.log('===========')
-    // console.log(files);
 
     //create file on google drive
     const requestBody = {
       mimeType,
       name: filename,
       parents: [ fileParentFolder ],
-      // customerId,
-      // partNumber,
-      // partRev,
-      // partDescription       //maybe this should be left out???
     };
+
     service.files.create({
       media,
       requestBody,
       fields: 'id',
       supportsAllDrives: true,
-      // addProperties: {
-      //   customerId,
-      //   partNumber,
-      //   partRev,
-      // }
+      addProperties: {            //this should be appProperties NOT addProperties
+        customerId,
+        partNumber,
+        partRev,
+      }
     })
     .then(() => bb.destroy())
     .catch((e) => bb.emit('error', e));
