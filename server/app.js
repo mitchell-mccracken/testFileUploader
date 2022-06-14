@@ -6,11 +6,8 @@ const { drive_v3, google, clouddebugger_v2 } = require('googleapis');
 const { GoogleAuth } = require('google-auth-library');
 require('dotenv').config();
 
-
 const app = express();
 const PORT = 3000;
-
-const apiKey = process.env.G_API_KEY;     //doesnt seem to be used
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -41,7 +38,8 @@ app.get('/test', testRoute);
 
 app.post('/upload', upload);
 app.post('/search', search);
-app.post('/delete', remove);    //not currently working
+app.post('/delete', remove);
+app.post('/deleteAll', removeAll);
 
 // dump all other requests
 app.all('*', (_req, res) => res.sendStatus(404));
@@ -50,6 +48,51 @@ app.all('*', (_req, res) => res.sendStatus(404));
 ///////////////
 // FUNCTIONS //
 ///////////////
+
+//Delete ALL files
+async function removeAll(req, res){
+  //google auth setup
+  const credentials = {
+    private_key: process.env.SA_privateKey.replace(/\\n/g, '\n'),
+    client_email: process.env.SA_clientEmail
+  };
+  const auth = new GoogleAuth({ 
+    credentials, 
+    scopes: 'https://www.googleapis.com/auth/drive'
+  })
+
+  const service = google.drive({
+    version: 'v3',
+    auth,
+  });
+
+  const files = await service.files.list({
+    q: `parents='0AG-3k0Os7-2KUk9PVA'`,         //this is the folder where all google drive files go when they are deleted from the web browser
+    fields: 'files(id,name, trashed, parents)'
+  });
+  // console.log(files.data.files)
+
+  if (!files.data.files.length)   { return res.status(400).send('No files found ') }
+  // console.log(files.data.files.length)
+
+  async function _helper(id){       //should add some type of error handling here
+    const result = await service.files.delete({fileId: `${id}`});
+    // console.log(result.status);
+    return result.status;
+  }
+
+  const promises = [];
+  for (f of files.data.files){
+    promises.push( _helper(f.id) );
+  }
+
+  await Promise.all(promises);
+  console.log(promises.length)
+
+  res.sendStatus(200)
+  res.status(200).send(`${promises.length} files deleted`)
+
+}
 
 //Delete files
 async function remove(req, res){
@@ -69,16 +112,12 @@ async function remove(req, res){
   });
 
   const files = await service.files.list({
-    // q: `parents='0AG-3k0Os7-2KUk9PVA'`,
+    q: `parents='0AG-3k0Os7-2KUk9PVA'`,
     fields: 'files(id,name, trashed, parents)'
   });
-  console.log(files.data.files)
-  console.log(files.data.files.length)
-  console.log(files.data.files[0]);
-  console.log(files.data.files[0].id);
 
-  const result = await service.files.delete({fileId: `'${files.data.files[0].id}'`});
-  console.log(result);
+  const result = await service.files.delete({fileId: `${files.data.files[0].id}`});
+  console.log(result.status);
 
   res.sendStatus(200)
 
@@ -110,7 +149,7 @@ async function search(_req, res){
   // console.log('files deleted')
 
   const files = await service.files.list({
-    // q: 'trashed=false',
+    q: 'trashed=false',
     // q: 'hidden=false',
     // q: 'name=\'timesheets_mongo_commands.txt\'',
     // q: 'id=\'1QcB7mnKzIzdVz04LaOnXPrTQweNPhTwb\'',
@@ -122,11 +161,16 @@ async function search(_req, res){
     // q: 'parents=\'1C8G-Yy0d1Zzw9SzFdNuu6Qj3C1ANWnKc\'',   //sub folder
     // q: 'parents=\'1f7l0TJ_Pfm9YO2tfcyN3N1J6I7aaUawX\'',
     // q: `parents='0AG-3k0Os7-2KUk9PVA'`,
-    fields: 'files(id,name, trashed, parents)'
+    // q: `parents='103MNr84L_AItWpEcTRq87xcmFE_Tj90E'`,   //c_id_2 folder,
+    // q: `parents='1sOgCx15ud-ldYPkqqrVDfTyr7djoR7c1'`,   //1234567890-b folder
+    // q: 'test=\'a test\'',
+    fields: 'files(id, name, trashed, parents)'
+    // fields: 'files(id, name, trashed, parents, test)'
 
   });
   console.log(files.data.files)
   console.log(files.data.files.length)
+  // console.log(files);
 
   
 
@@ -170,15 +214,6 @@ async function upload(req, res){
     const { customerId, partNumber, partRev, partDescription } = data;
 
     const { filename, mimeType } = fileInfo;
-    // const requestBody = {
-    //   mimeType,
-    //   name: filename,
-    //   parents: [ folderId ],
-    //   // customerId,
-    //   // partNumber,
-    //   // partRev,
-    //   // partDescription       //maybe this should be left out???
-    // };
 
     const media = {
       body: fileStream,
@@ -264,10 +299,11 @@ async function upload(req, res){
       requestBody,
       fields: 'id',
       supportsAllDrives: true,
-      addProperties: {            //this should be appProperties NOT addProperties
-        customerId,
-        partNumber,
-        partRev,
+      appProperties: {            //this should be appProperties NOT addProperties
+        // customerId,
+        // partNumber,
+        // partRev,
+        "test": 'a test'
       }
     })
     .then(() => bb.destroy())
